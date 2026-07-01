@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AirportWaitData } from "@/lib/types";
+import { fetchIAH, fetchLGA } from "@/lib/fetchers";
 import AirportCard from "./components/AirportCard";
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -14,39 +15,27 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [refreshCount, setRefreshCount] = useState(0);
   const [countdown, setCountdown] = useState(COUNTDOWN_SECS);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Data fetching – all setState calls happen asynchronously (after awaits)
+  // Data fetching – runs in the browser so requests originate from the user's
+  // network (no server-side egress restrictions apply).
   useEffect(() => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    let cancelled = false;
 
     void (async () => {
       try {
-        const [lgaRes, iahRes] = await Promise.all([
-          fetch("/api/lga", { signal: controller.signal }),
-          fetch("/api/iah", { signal: controller.signal }),
-        ]);
-        if (controller.signal.aborted) return;
-        const [lga, iah]: [AirportWaitData, AirportWaitData] = await Promise.all(
-          [lgaRes.json(), iahRes.json()]
-        );
-        setLgaData(lga);
-        setIahData(iah);
+        const [lga, iah] = await Promise.all([fetchLGA(), fetchIAH()]);
+        if (!cancelled) {
+          setLgaData(lga);
+          setIahData(iah);
+        }
       } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          console.error("Failed to fetch wait times:", err);
-        }
+        console.error("Failed to fetch wait times:", err);
       } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     })();
 
     return () => {
-      controller.abort();
+      cancelled = true;
     };
   }, [refreshCount]);
 
